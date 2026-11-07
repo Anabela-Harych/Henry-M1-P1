@@ -1,0 +1,16 @@
+# Entorno y secretos locales
+.venv/
+.env
+.env.*
+!.env.example
+
+# Python y herramientas
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Resultados generados
+data/reports/*
+!data/reports/.gitkeep
