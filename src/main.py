@@ -2,6 +2,7 @@ import argparse
 import sys
 import json
 
+from src.input_guard import BlockedQueryError
 from src.llm.client import LLMClient
 from src.llm.config import load_config
 from src.llm.errors import (
@@ -52,6 +53,12 @@ def main() -> int:
         client = LLMClient(config, build_provider(config))
         support_service = SupportService(client)
         response, _generation = support_service.respond(" ".join(args.query))
+    except BlockedQueryError as error:
+        print(
+            json.dumps({"error": {"type": "blocked_query", "message": str(error)}}),
+            file=sys.stderr,
+        )
+        return 4
     except LLMConfigurationError as error:
         print(
             json.dumps({"error": {"type": "configuration", "message": str(error)}}, ensure_ascii=False),

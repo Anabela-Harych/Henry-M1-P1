@@ -27,6 +27,12 @@ class ProviderCallError(RuntimeError):
 class InvalidStructuredResponse(ValueError):
     """The provider response could not be validated against the app contract."""
 
-    def __init__(self, message: str, issues: list[dict[str, str]] | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        issues: list[dict[str, str]] | None = None,
+        generation: object | None = None,
+    ) -> None:
         super().__init__(message)
         self.issues = issues or []
+        self.generation = generation

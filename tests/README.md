@@ -1,3 +1,7 @@
 # tests/
 
-Acá irán las pruebas del software: validación del contrato JSON, categorías permitidas, serialización de la CLI y manejo de errores. Las evals miden la calidad de las respuestas con datos etiquetados; estas pruebas verifican el comportamiento del código.
+Ejecutá las pruebas locales desde la raíz del proyecto. Usan un proveedor simulado y verifican el registro de uso en respuestas válidas, respuestas inválidas y fallos del proveedor.
+
+```powershell
+python -m unittest discover -s tests -v
+```

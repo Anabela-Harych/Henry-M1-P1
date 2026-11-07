@@ -26,6 +26,7 @@ class LLMClient:
         schema_name: str,
         system_instruction: str | None = None,
         prompt_id: str | None = None,
+        defer_response_log: bool = False,
     ) -> GenerationResult:
         if not prompt.strip():
             raise ValueError("La consulta no puede estar vacía.")
@@ -70,24 +71,8 @@ class LLMClient:
                     request_id=provider_output.request_id,
                     finish_reason=provider_output.finish_reason,
                 )
-                append_usage_event(
-                    self._config.usage_log_path,
-                    {
-                        "provider": result.provider,
-                        "model": result.model,
-                        "prompt_id": result.prompt_id,
-                        "status": "success",
-                        "input_tokens": result.input_tokens,
-                        "output_tokens": result.output_tokens,
-                        "total_tokens": result.total_tokens,
-                        "latency_ms": result.latency_ms,
-                        "attempts": result.attempts,
-                        "estimated_cost_usd": result.estimated_cost_usd,
-                        "cost_basis": result.cost_basis,
-                        "request_id": result.request_id,
-                        "finish_reason": result.finish_reason,
-                    },
-                )
+                if not defer_response_log:
+                    self.record_response_usage(result)
                 return result
             except ProviderCallError as error:
                 if not self._should_retry(error, attempts):
@@ -110,20 +95,26 @@ class LLMClient:
                     raise
                 time.sleep(self._retry_delay(error, attempts))
 
-    def record_contract_failure(
+    def record_response_usage(
         self,
         result: GenerationResult,
-        issues: list[dict[str, str]],
+        *,
+        validation_issues: list[dict[str, str]] | None = None,
     ) -> None:
+        status = {"status": "success"}
+        if validation_issues is not None:
+            status = {
+                "status": "invalid_contract",
+                "error_type": "invalid_structured_response",
+                "validation_issues": validation_issues,
+            }
         append_usage_event(
             self._config.usage_log_path,
             {
                 "provider": result.provider,
                 "model": result.model,
                 "prompt_id": result.prompt_id,
-                "status": "invalid_contract",
-                "error_type": "invalid_structured_response",
-                "validation_issues": issues,
+                **status,
                 "input_tokens": result.input_tokens,
                 "output_tokens": result.output_tokens,
                 "total_tokens": result.total_tokens,

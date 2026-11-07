@@ -1,4 +1,4 @@
-import httpx2
+import httpx
 from google import genai
 from google.genai import errors, types
 from typing import Any
@@ -54,11 +54,11 @@ class GeminiProvider:
                     response_json_schema=response_schema,
                 ),
             )
-        except httpx2.TimeoutException as error:
+        except httpx.TimeoutException as error:
             raise ProviderCallError(
                 "gemini", "timeout", "Gemini agotó el tiempo de espera.", retryable=True
             ) from error
-        except httpx2.TransportError as error:
+        except httpx.TransportError as error:
             raise ProviderCallError(
                 "gemini", "connection", "No se pudo conectar con Gemini.", retryable=True
             ) from error

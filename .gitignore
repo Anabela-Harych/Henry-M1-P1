@@ -14,3 +14,4 @@ htmlcov/
 # Resultados generados
 data/reports/*
 !data/reports/.gitkeep
+!data/reports/input_guard_report.example.jsonl

@@ -1,5 +1,6 @@
 from pydantic import ValidationError
 
+from src.input_guard import check_query
 from src.llm.client import LLMClient
 from src.llm.errors import InvalidStructuredResponse
 from src.llm.models import GenerationResult
@@ -11,10 +12,12 @@ class SupportService:
         self._llm_client = llm_client
 
     def respond(self, query: str) -> tuple[SupportResponse, GenerationResult]:
+        check_query(query)
         generation = self._llm_client.generate(
             query,
             response_schema=SupportResponse.model_json_schema(),
             schema_name="nubbix_support_response",
+            defer_response_log=True,
         )
         try:
             response = SupportResponse.model_validate_json(generation.text)
@@ -30,9 +33,11 @@ class SupportService:
                 issues.append(
                     {"field": "$", "issue": f"finish_reason:{generation.finish_reason}"}
                 )
-            self._llm_client.record_contract_failure(generation, issues)
+            self._llm_client.record_response_usage(generation, validation_issues=issues)
             raise InvalidStructuredResponse(
                 "El proveedor devolvió una respuesta que no cumple el contrato.",
                 issues,
+                generation,
             ) from error
+        self._llm_client.record_response_usage(generation)
         return response, generation

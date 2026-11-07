@@ -1,5 +1,15 @@
-# prompts/
+# Prompts versionados
 
-Acá se guardarán versiones identificables de los prompts y el registro de experimentos. Cada comparación deberá indicar qué cambió y enlazar el resultado correspondiente en `data/reports/`. La técnica final se elegirá con evidencia de las evaluaciones.
+Los prompts se mantienen en YAML fuera del código. `src/llm/prompt_loader.py` carga `version`, `system` y, cuando existen, ejemplos de entrada y salida. Se elige una versión por CLI con `--prompt`; por defecto se usa `v1_zero_shot.yaml`.
 
-`v1_zero_shot.yaml`, `v2-fewshot.yaml` y `v3-structured.yaml` son las tres variantes disponibles para el negocio. La CLI selecciona una con `--prompt`; si no se indica, usa `v1_zero_shot.yaml`. `v2-fewshot.yaml` añade ejemplos que el cargador incorpora a la instrucción del sistema.
+## Variantes
+
+- `v1_zero_shot.yaml`: línea base con instrucciones directas y sin ejemplos.
+- `v2-fewshot.yaml`: las reglas de la línea base más ejemplos sintéticos para las cuatro categorías.
+- `v3-structured.yaml`: contexto dividido en rol y alcance, autoridad de la consulta, criterio de clasificación, respuesta y contrato de salida.
+
+Cada archivo tiene una versión estable. Al cambiar reglas o ejemplos, creá una nueva versión en vez de reescribir el archivo usado en una corrida; así los resultados pueden vincularse con el prompt exacto.
+
+## Experimentos
+
+Ejecutá `python -m evals.runner --execute` para comparar prompts y proveedores sobre el mismo dataset. Registrá métricas y selección por modelo en [`EXPERIMENTS.md`](EXPERIMENTS.md). El reporte detallado y la hoja de revisión se generan en `data/reports/`; usá esta última para evaluar manualmente pertinencia, seguridad, acciones y concisión.
