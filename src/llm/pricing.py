@@ -1,5 +1,8 @@
 import os
 from dataclasses import dataclass
+from math import isfinite
+
+from src.llm.errors import LLMConfigurationError
 
 
 @dataclass(frozen=True)
@@ -14,9 +17,11 @@ class PriceRates:
 # Official sources:
 # https://developers.openai.com/api/docs/models/gpt-6-luna
 # https://ai.google.dev/gemini-api/docs/pricing
+# https://console.groq.com/docs/models
 DEFAULT_RATES = {
     ("openai", "gpt-6-luna"): (0.10, 0.50),
     ("gemini", "gemini-3.6-flash"): (0.75, 3.75),
+    ("groq", "openai/gpt-oss-20b"): (0.075, 0.30),
 }
 
 
@@ -27,14 +32,14 @@ def _optional_price(name: str) -> float | None:
     try:
         value = float(raw_value)
     except ValueError as error:
-        raise ValueError(f"{name} debe ser un precio numérico.") from error
-    if value < 0:
-        raise ValueError(f"{name} no puede ser negativo.")
+        raise LLMConfigurationError(f"{name} debe ser un precio numérico.") from error
+    if not isfinite(value) or value < 0:
+        raise LLMConfigurationError(f"{name} debe ser un precio finito y no negativo.")
     return value
 
 
 def price_rates_for(provider: str, model: str) -> PriceRates | None:
-    prefix = "OPENAI" if provider == "openai" else "GEMINI"
+    prefix = provider.upper()
     input_override = _optional_price(f"{prefix}_INPUT_USD_PER_MILLION_TOKENS")
     output_override = _optional_price(f"{prefix}_OUTPUT_USD_PER_MILLION_TOKENS")
     defaults = DEFAULT_RATES.get((provider, model))
@@ -53,20 +58,15 @@ def price_rates_for(provider: str, model: str) -> PriceRates | None:
 
 
 def estimate_cost_usd(
-    provider: str,
-    model: str,
     input_tokens: int | None,
     output_tokens: int | None,
-) -> tuple[float | None, str | None]:
-    if input_tokens is None or output_tokens is None:
-        return None, None
-
-    rates = price_rates_for(provider, model)
-    if rates is None:
-        return None, None
+    rates: PriceRates | None,
+) -> float | None:
+    if input_tokens is None or output_tokens is None or rates is None:
+        return None
 
     cost = (
         input_tokens * rates.input_usd_per_million
         + output_tokens * rates.output_usd_per_million
     ) / 1_000_000
-    return round(cost, 10), rates.source
+    return round(cost, 10)

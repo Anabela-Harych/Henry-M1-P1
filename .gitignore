@@ -12,6 +12,7 @@ __pycache__/
 htmlcov/
 
 # Resultados generados
+/data/metrics.jsonl
 data/reports/*
 !data/reports/.gitkeep
 !data/reports/input_guard_report.example.jsonl

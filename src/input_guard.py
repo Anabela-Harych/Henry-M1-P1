@@ -6,9 +6,14 @@ class BlockedQueryError(ValueError):
     """The input matched a local blocking rule."""
 
 
-_OVERRIDE_INSTRUCTIONS = re.compile(
+_COMMAND_START = (
     r"(?:^|[.!?;\n])\s*"
-    r"(?:(?:antes\s+de\s+responder|before\s+(?:you\s+)?(?:answer|respond))\s*,\s*)?"
+    r"(?:\[(?:system|developer|sistema|desarrollador)\](?:\s*:)?\s*)?"
+)
+
+_OVERRIDE_INSTRUCTIONS = re.compile(
+    _COMMAND_START
+    + r"(?:(?:antes\s+de\s+responder|before\s+(?:you\s+)?(?:answer|respond))\s*[,:]\s*)?"
     r"(?:"
     r"(?:ignora|omite|olvida|desobedece)\s+"
     r"(?:(?:todas\s+)?(?:tus|las)\s+)?(?:instrucciones|reglas)"
@@ -18,13 +23,18 @@ _OVERRIDE_INSTRUCTIONS = re.compile(
 )
 
 _DISCLOSE_PROTECTED_TEXT = re.compile(
-    r"(?:^|[.!?;\n])\s*(?:"
-    r"(?:por favor[,]?\s+)?"
-    r"(?:mostra|mostrame|muestra|muestrame|dame|revela|revelame|imprime|imprimi|decime|dime)\s+"
-    r"(?:(?:la|el|una|tu|mi)\s+)?"
-    r"(?:clave\s+(?:de\s+)?api|prompt\s+(?:de|del)\s+sistema)"
-    r"|(?:please\s+)?(?:show|reveal|print|give)\s+(?:me\s+)?"
-    r"(?:(?:the|a|your|my)\s+)?(?:api[\s_-]+key|system[\s_-]+prompt)"
+    _COMMAND_START
+    + r"(?:[¿¡]\s*)?(?:"
+    r"(?:por\s+favor[,]?\s+)?(?:(?:me\s+)?(?:podrias|puedes|podes)\s+)?"
+    r"(?:mostra|mostrame|muestra|muestrame|mostrar|mostrarme|dame"
+    r"|revela|revelame|revelar|revelarme|imprime|imprimi|decime|dime"
+    r"|copi(?:a|ame|ar|arme)|compart(?:e|ime|ir|irme))\s+"
+    r"(?:(?:aca|aqui)\s+)?(?:(?:la|las|el|una|tu|tus|mi)\s+)?"
+    r"(?:clave\s+(?:de\s+)?api|prompt\s+(?:de|del)\s+sistema"
+    r"|instrucciones\s+(?:internas|(?:de|del)\s+sistema))"
+    r"|(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+    r"(?:show|reveal|print|give|copy|share)\s+(?:me\s+)?"
+    r"(?:(?:the|a|your|my)\s+)?(?:api[\s_-]+key|system[\s_-]+prompt|internal\s+instructions)"
     r")\b"
 )
 

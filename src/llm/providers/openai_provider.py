@@ -35,11 +35,12 @@ def _retry_after_seconds(error: APIStatusError) -> float | None:
 
 
 class OpenAIProvider:
-    def __init__(self, config: LLMConfig) -> None:
+    def __init__(self, config: LLMConfig, *, base_url: str | None = None) -> None:
         self._config = config
         # Retries are handled once by LLMClient so the total attempt limit is clear.
         self._client = OpenAI(
             api_key=config.api_key,
+            base_url=base_url,
             timeout=config.timeout_seconds,
             max_retries=0,
         )
@@ -53,29 +54,37 @@ class OpenAIProvider:
         schema_name: str,
         max_output_tokens: int,
     ) -> ProviderOutput:
+        provider = self._config.provider
+        provider_name = "Groq" if provider == "groq" else "OpenAI"
+        text_config: dict[str, Any] = {
+            "format": {
+                "type": "json_schema",
+                "name": schema_name,
+                "strict": True,
+                "schema": response_schema,
+            },
+        }
+        request_options: dict[str, Any] = {}
+        if provider == "openai":
+            text_config["verbosity"] = "low"
+        elif provider == "groq" and self._config.model == "openai/gpt-oss-20b":
+            request_options["reasoning"] = {"effort": "low"}
         try:
             response = self._client.responses.create(
                 model=self._config.model,
                 instructions=system_instruction,
                 input=prompt,
                 max_output_tokens=max_output_tokens,
-                text={
-                    "verbosity": "low",
-                    "format": {
-                        "type": "json_schema",
-                        "name": schema_name,
-                        "strict": True,
-                        "schema": response_schema,
-                    },
-                },
+                text=text_config,
+                **request_options,
             )
         except APITimeoutError as error:
             raise ProviderCallError(
-                "openai", "timeout", "OpenAI agotó el tiempo de espera.", retryable=True
+                provider, "timeout", f"{provider_name} agotó el tiempo de espera.", retryable=True
             ) from error
         except APIConnectionError as error:
             raise ProviderCallError(
-                "openai", "connection", "No se pudo conectar con OpenAI.", retryable=True
+                provider, "connection", f"No se pudo conectar con {provider_name}.", retryable=True
             ) from error
         except APIStatusError as error:
             status_code = error.status_code
@@ -85,16 +94,16 @@ class OpenAIProvider:
             )
             kind = "rate_limit" if status_code == 429 else "provider_status"
             raise ProviderCallError(
-                "openai",
+                provider,
                 kind,
-                f"OpenAI devolvió un error HTTP {status_code}.",
+                f"{provider_name} devolvió un error HTTP {status_code}.",
                 retryable=retryable,
                 status_code=status_code,
                 retry_after_seconds=_retry_after_seconds(error),
             ) from error
         except OpenAIError as error:
             raise ProviderCallError(
-                "openai", "provider_error", "OpenAI no pudo completar la solicitud."
+                provider, "provider_error", f"{provider_name} no pudo completar la solicitud."
             ) from error
 
         usage = getattr(response, "usage", None)

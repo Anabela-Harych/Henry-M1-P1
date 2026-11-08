@@ -26,6 +26,8 @@ class GenerationResult:
     cost_basis: str | None
     request_id: str | None
     finish_reason: str | None
+    input_usd_per_million: float | None = None
+    output_usd_per_million: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

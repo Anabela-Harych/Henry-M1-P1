@@ -4,8 +4,9 @@ import json
 
 from src.input_guard import BlockedQueryError
 from src.llm.client import LLMClient
-from src.llm.config import load_config
+from src.llm.config import SUPPORTED_PROVIDERS, load_config
 from src.llm.errors import (
+    EmptyQueryError,
     InvalidStructuredResponse,
     LLMConfigurationError,
     ProviderCallError,
@@ -20,16 +21,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--provider",
-        choices=("openai", "gemini"),
+        choices=SUPPORTED_PROVIDERS,
         help="Proveedor a usar; por defecto toma LLM_PROVIDER o MODEL_A_PROVIDER de .env.",
     )
     parser.add_argument("--model", help="Modelo a usar; por defecto toma la configuración.")
     parser.add_argument(
         "--prompt",
-        help="Archivo YAML de prompt; por defecto usa LLM_PROMPT_PATH o v1_zero_shot.yaml.",
+        help="Archivo YAML de prompt. Por defecto usa LLM_PROMPT_PATH o v1_1_scope.yaml.",
     )
     parser.add_argument("--timeout", type=float, help="Timeout por intento, en segundos.")
-    parser.add_argument("--retries", type=int, help="Cantidad máxima de reintentos.")
+    parser.add_argument("--retries", type=int, help="Presupuesto compartido de reintentos.")
     parser.add_argument(
         "--max-output-tokens",
         type=int,
@@ -53,6 +54,12 @@ def main() -> int:
         client = LLMClient(config, build_provider(config))
         support_service = SupportService(client)
         response, _generation = support_service.respond(" ".join(args.query))
+    except EmptyQueryError as error:
+        print(
+            json.dumps({"error": {"type": "empty_query", "message": str(error)}}, ensure_ascii=False),
+            file=sys.stderr,
+        )
+        return 2
     except BlockedQueryError as error:
         print(
             json.dumps({"error": {"type": "blocked_query", "message": str(error)}}),

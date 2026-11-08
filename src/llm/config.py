@@ -8,7 +8,9 @@ from src.llm.errors import LLMConfigurationError
 from src.llm.prompt_loader import load_prompt
 
 
-SUPPORTED_PROVIDERS = {"openai", "gemini"}
+SUPPORTED_PROVIDERS = ("openai", "gemini", "groq")
+DEFAULT_MAX_OUTPUT_TOKENS = 256
+DEFAULT_USAGE_LOG_PATH = Path("data/metrics.jsonl")
 
 
 @dataclass(frozen=True)
@@ -22,8 +24,8 @@ class LLMConfig:
     gemini_thinking_level: str = "minimal"
     max_retries: int = 1
     retry_base_delay_seconds: float = 0.5
-    max_output_tokens: int = 512
-    usage_log_path: Path = Path("data/reports/llm_usage.jsonl")
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
+    usage_log_path: Path = DEFAULT_USAGE_LOG_PATH
 
 
 def normalize_provider(value: str) -> str:
@@ -79,6 +81,7 @@ def _configured_models() -> dict[str, str]:
         ("openai", "OPENAI_MODEL"),
         ("gemini", "GEMINI_MODEL"),
         ("gemini", "GOOGLE_MODEL"),
+        ("groq", "GROQ_MODEL"),
     ):
         model = os.getenv(env_name, "").strip()
         if model:
@@ -87,10 +90,11 @@ def _configured_models() -> dict[str, str]:
 
 
 def _api_key_for(provider: str) -> str:
-    if provider == "openai":
-        names = ("OPENAI_API_KEY",)
-    else:
-        names = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
+    names = {
+        "openai": ("OPENAI_API_KEY",),
+        "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+        "groq": ("GROQ_API_KEY",),
+    }[provider]
 
     for name in names:
         value = os.getenv(name, "").strip()
@@ -151,14 +155,14 @@ def load_config(
     output_limit = (
         max_output_tokens_override
         if max_output_tokens_override is not None
-        else _env_int("LLM_MAX_OUTPUT_TOKENS", 256, minimum=1, maximum=8192)
+        else _env_int("LLM_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS, minimum=1, maximum=8192)
     )
     if not 1 <= output_limit <= 8192:
         raise LLMConfigurationError("Los tokens de salida deben estar entre 1 y 8192.")
 
     prompt_path = Path(
         prompt_path_override
-        or os.getenv("LLM_PROMPT_PATH", "prompts/v1_zero_shot.yaml").strip()
+        or os.getenv("LLM_PROMPT_PATH", "prompts/v1_1_scope.yaml").strip()
     )
     prompt = load_prompt(prompt_path)
 
@@ -176,6 +180,6 @@ def load_config(
         ),
         max_output_tokens=output_limit,
         usage_log_path=Path(
-            os.getenv("LLM_USAGE_LOG_PATH", "data/reports/llm_usage.jsonl").strip()
+            os.getenv("LLM_USAGE_LOG_PATH", "").strip() or DEFAULT_USAGE_LOG_PATH
         ),
     )

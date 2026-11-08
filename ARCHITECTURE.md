@@ -1,55 +1,36 @@
 # Arquitectura
 
-## Estado
+`CLI → servicio → filtro de entrada → cliente LLM → adaptador → proveedor → validación Pydantic → métricas y JSON`
 
-Flujo principal implementado: CLI, adaptadores para OpenAI y Gemini, salida JSON estructurada validada, límites de llamada y registro de uso. `python -m evals.runner --execute` compara las versiones de prompt sobre el dataset etiquetado y genera resultados globales y por categoría.
+## 1. Proveedores y control de llamadas
 
-## Flujo previsto
+`src/main.py` carga la configuración de `.env` y las opciones de la CLI. `src/llm/factory.py` construye un adaptador bajo el contrato `LLMProvider`. OpenAI y Groq comparten el adaptador compatible con Responses API. Gemini tiene su propio adaptador. Cada ejecución usa el proveedor elegido, incluido cualquier reintento.
 
-1. La CLI recibe una consulta y el proveedor elegido por `--provider` o `.env`.
-2. La fábrica selecciona el adaptador común de OpenAI o Gemini y aplica el prompt de sistema versionado.
-3. El adaptador envía la consulta, la instrucción del prompt y el esquema JSON usando el SDK oficial.
-4. La capa común aplica el límite de reintentos y mide latencia total.
-5. El servicio valida localmente la respuesta antes de serializar los cuatro campos del contrato.
-6. Se estima el costo y se registra metadato de uso, sin guardar la consulta ni la respuesta.
+OpenAI queda como proveedor inicial por su cobertura en la evaluación. Gemini permite probar el mismo contrato con otro SDK y Groq aporta una opción para comparar costo y latencia. Los resultados están en el [README](README.md#extra-credit--comparativa-de-modelos).
 
-## Contrato de salida
+| Parámetro | Decisión |
+|---|---|
+| Salida | 256 tokens por defecto para acotar el consumo de una respuesta breve. |
+| Tiempo de espera | 30 segundos por intento para limitar la espera ante fallos. |
+| Reintentos | Uno por defecto, compartido entre errores recuperables del proveedor y fallos del contrato. |
+| Temperatura | Se conserva la predeterminada del proveedor. OpenAI mantiene el razonamiento predeterminado de Luna, Gemini usa `minimal` tras observar `MAX_TOKENS` y Groq usa `low` para dar más margen al JSON. |
 
-La respuesta tendrá cuatro campos:
+`src/llm/client.py` controla los reintentos. Un `429` temporal, un `503` o un timeout pueden reintentarse. Los errores de autenticación o los límites permanentes de cuota identificados por el adaptador cierran la consulta.
 
-- `answer`: texto para el usuario.
-- `confidence`: número entre `0.0` y `1.0`. Se considera una señal de confianza del modelo, no una probabilidad calibrada hasta medir su calibración.
-- `category`: uno de `billing`, `technical`, `account` o `other`.
-- `actions`: lista de acciones sugeridas para el agente humano; no se ejecutan automáticamente.
+`src/llm/telemetry.py` agrega una fila JSONL por consulta enviada al proveedor. Guarda el ticket con enmascarado de patrones sensibles, el resultado final, los tokens, la latencia total, los intentos y las tarifas aplicadas. Un error recuperado queda resumido en el número de intentos. El costo estimado es `(tokens de entrada × tarifa de entrada + tokens de salida × tarifa de salida) / 1.000.000`, con tarifas en USD por millón. Si falta consumo o tarifa, el costo queda en `null`.
 
-La salida debe fallar de forma controlada si falta un campo o la categoría no pertenece al conjunto permitido.
+## 2. Context engineering
 
-## Componentes previstos
+`src/llm/prompt_loader.py` carga un YAML con una versión y una instrucción de sistema. El ticket se envía como entrada separada. `v1` da reglas directas, `v2` agrega ejemplos y `v3` divide las reglas en secciones. El [piloto de prompts](README.md#2-comparar-y-elegir-el-prompt) respalda la selección de `v1` con OpenAI.
 
-- `src/`: punto de entrada CLI, esquema del contrato, servicio, fábrica y adaptadores OpenAI/Gemini, límites, estimación de costo y telemetría.
-- `prompts/`: versiones comparables del prompt y notas de cada experimento.
-- `data/datasets/`: ejemplos etiquetados para evaluación y, opcionalmente, casos adversariales.
-- `evals/`: ejecución del dataset, métricas globales y por categoría, y generación de reportes.
-- `tests/`: pruebas del contrato, serialización y componentes locales.
-- `data/reports/`: resultados generados; no se guardan secretos en ellos.
+## 3. Contrato de salida
 
-## Context engineering y evidencia
+`src/schemas.py` define `SupportResponse` con `answer`, `confidence`, `category` y `actions`. El adaptador envía su JSON Schema y `src/service.py` valida la respuesta localmente con Pydantic. Si el contrato falla, el cliente puede repetir una vez la consulta con el mismo esquema cuando queda presupuesto. Si se agota, la CLI emite `invalid_structured_response`.
 
-La técnica aplicada en `prompts/v3-structured.yaml` es estructurar el contexto en secciones con funciones distintas: rol y alcance, confianza en los datos de entrada, reglas de clasificación, criterios de respuesta y contrato de salida. Esto hace explícito qué información es instrucción, qué contenido es dato no confiable y cómo resolver ambigüedades. También permite modificar una parte de la política sin mezclarla con el formato de salida. El prompt se mantiene en YAML y se carga fuera del código.
+## 4. Seguridad
 
-Para medir el efecto, `evals/runner.py` compara esa versión con `v1_zero_shot.yaml` (instrucción base) y `v2-fewshot.yaml` (la misma base más ejemplos en contexto). Los modelos de la comparación son OpenAI `gpt-6-luna` y Gemini `gemini-3.6-flash`. Cada variante se aplica a los mismos casos, con el mismo esquema de salida y límites de llamada; se reportan resultados por modelo y prompt para no confundir el efecto del proveedor con el del contexto.
+`src/input_guard.py` detecta patrones de inyección y pedidos de secretos antes de llamar al modelo. El prompt indica cómo tratar el texto del ticket y proteger credenciales e instrucciones internas. Las acciones requieren decisión humana. La prueba adversarial mide cuántos ataques del dataset bloquea el filtro de entrada.
 
-El score global y por categoría es exactitud de clasificación sobre todos los casos; una salida inválida o un error cuenta como incorrecto. Se informa por separado la tasa de contrato válido, tokens, latencia y costo estimado. Las respuestas y acciones se revisan además con los criterios etiquetados del dataset: pertinencia, seguridad, utilidad, concisión y aceptación. La decisión por modelo prioriza validez del contrato y exactitud; los empates se resuelven por costo y latencia, después de revisar la calidad de las respuestas. La corrida reproducible y la selección quedan registradas en `prompts/EXPERIMENTS.md`.
+## 5. Evaluación
 
-El dataset `data/datasets/eval_pilot.jsonl` contiene veinte casos sintéticos, cinco por categoría. Los resultados justifican una elección inicial para continuar el proyecto, no una afirmación de desempeño en producción; antes de esa conclusión hay que ampliar y revisar el conjunto con casos representativos del negocio.
-
-## Seguridad y límites
-
-- El servicio aplica un filtro local a la entrada antes de llamar al proveedor. Una orden explícita para ignorar instrucciones puede producir el error `blocked_query`. Las pruebas cubren patrones en español e inglés y un control legítimo de recuperación de contraseña.
-- Las acciones son recomendaciones para una persona; el servicio no realiza cambios en cuentas ni cobros.
-- Las claves se leen desde variables locales y nunca se registran en prompts, reportes o control de versiones.
-- Los reintentos son acotados, se aplican solo a fallos transitorios y no se realizan para errores de configuración o autenticación.
-- El límite de tokens y el timeout acotan la salida y la duración de cada llamada. La estimación de costo usa tarifas configurables y no reemplaza la factura del proveedor.
-- En Gemini, el nivel de pensamiento se configura por separado porque sus tokens cuentan dentro del límite de salida. El valor inicial es `minimal` para este flujo de clasificación.
-- El registro de uso guarda proveedor, modelo, tokens, latencia, intentos y costo estimado, sin guardar texto de entrada ni salida.
-- La suite adversarial local prueba cinco consultas sintéticas y reporta el resultado del filtro por separado de las evals del modelo.
+`evals/runner.py` evalúa combinaciones de proveedor y prompt sobre `data/datasets/eval_ticket_sup.jsonl`. Calcula *Exact Match* de categoría global y por categoría, validez del contrato, consumo, costo y latencia. El JSON guarda las respuestas y acciones por caso. `evals/input_guard.py` evalúa el filtro por separado con el dataset adversarial. Los [comandos de ejecución](README.md#5-ejecutar-las-evals-y-leer-el-reporte) están en el README.

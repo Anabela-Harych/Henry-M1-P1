@@ -1,5 +1,12 @@
+from src.llm.models import GenerationResult
+
+
 class LLMConfigurationError(ValueError):
     """Configuration is missing or invalid before an API request is sent."""
+
+
+class EmptyQueryError(ValueError):
+    """The query contains no text to send to the provider."""
 
 
 class ProviderCallError(RuntimeError):
@@ -22,6 +29,7 @@ class ProviderCallError(RuntimeError):
         self.retryable = retryable
         self.status_code = status_code
         self.retry_after_seconds = retry_after_seconds
+        self.generation: GenerationResult | None = None
 
 
 class InvalidStructuredResponse(ValueError):
@@ -31,7 +39,7 @@ class InvalidStructuredResponse(ValueError):
         self,
         message: str,
         issues: list[dict[str, str]] | None = None,
-        generation: object | None = None,
+        generation: GenerationResult | None = None,
     ) -> None:
         super().__init__(message)
         self.issues = issues or []

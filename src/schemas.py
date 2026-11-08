@@ -11,6 +11,7 @@ class SupportResponse(BaseModel):
 
     answer: str = Field(min_length=1, description="Respuesta breve para el usuario.")
     confidence: float = Field(
+        strict=True,
         ge=0.0,
         le=1.0,
         description="Confianza autodeclarada, en una escala de 0 a 1.",

@@ -11,4 +11,6 @@ def build_provider(config: LLMConfig) -> LLMProvider:
         return OpenAIProvider(config)
     if provider == "gemini":
         return GeminiProvider(config)
+    if provider == "groq":
+        return OpenAIProvider(config, base_url="https://api.groq.com/openai/v1")
     raise LLMConfigurationError(f"No hay un adaptador implementado para {provider}.")

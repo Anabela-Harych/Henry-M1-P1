@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import os
 import sys
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
 from src.input_guard import BlockedQueryError
 from src.llm.client import LLMClient
-from src.llm.config import LLMConfig, load_config, normalize_provider
+from src.llm.config import SUPPORTED_PROVIDERS, LLMConfig, load_config, normalize_provider
 from src.llm.errors import (
     InvalidStructuredResponse,
     LLMConfigurationError,
@@ -27,34 +27,13 @@ from src.service import SupportService
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DATASET = ROOT / "data" / "datasets" / "eval_pilot.jsonl"
+DEFAULT_DATASET = ROOT / "data" / "datasets" / "eval_ticket_sup.jsonl"
 DEFAULT_PROMPTS = [
     ROOT / "prompts" / "v1_zero_shot.yaml",
     ROOT / "prompts" / "v2-fewshot.yaml",
     ROOT / "prompts" / "v3-structured.yaml",
 ]
 VALID_CATEGORIES = {"billing", "technical", "account", "other"}
-REVIEW_FIELDS = [
-    "case_id",
-    "provider",
-    "model",
-    "prompt_id",
-    "query",
-    "expected_category",
-    "predicted_category",
-    "answer",
-    "actions",
-    "answer_criteria",
-    "action_criteria",
-    "must_not",
-    "answer_relevant_0_or_1",
-    "answer_safe_0_or_1",
-    "actions_useful_0_or_1",
-    "concise_0_or_1",
-    "human_accept_0_or_1",
-    "review_notes",
-    "status",
-]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -69,9 +48,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--providers",
         nargs="+",
-        choices=("openai", "gemini"),
+        choices=SUPPORTED_PROVIDERS,
         default=("openai", "gemini"),
-        help="Proveedores a comparar; por defecto ambos.",
+        help="Proveedores a comparar. Por defecto, OpenAI y Gemini.",
     )
     parser.add_argument(
         "--dataset", type=Path, default=DEFAULT_DATASET, help="Archivo JSONL etiquetado."
@@ -95,6 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-output-tokens",
         type=int,
         help="Sobrescribe el límite de salida configurado en .env.",
+    )
+    parser.add_argument(
+        "--delay-seconds",
+        type=float,
+        default=0.0,
+        help="Pausa entre tickets de cada combinación de modelo y prompt.",
     )
     return parser
 
@@ -122,6 +107,8 @@ def load_dataset(path: Path) -> list[dict[str, Any]]:
             )
         if case["expected_category"] not in VALID_CATEGORIES:
             raise ValueError(f"Categoría inválida en la línea {line_number}.")
+        if not isinstance(case.get("ambiguous", False), bool):
+            raise ValueError(f"ambiguous debe ser un booleano en la línea {line_number}.")
         for field in ("answer_criteria", "action_criteria", "must_not"):
             if not isinstance(case.get(field, []), list):
                 raise ValueError(f"{field} debe ser una lista en la línea {line_number}.")
@@ -182,6 +169,7 @@ def base_result(
     return {
         "case_id": case["id"],
         "expected_category": case["expected_category"],
+        "ambiguous": case.get("ambiguous", False),
         "provider": provider,
         "model": config.model if config else None,
         "prompt_id": config.prompt_id if config else prompt_path.stem,
@@ -200,6 +188,8 @@ def base_result(
         "attempts": None,
         "estimated_cost_usd": None,
         "cost_basis": None,
+        "input_usd_per_million": None,
+        "output_usd_per_million": None,
         "finish_reason": None,
         "error_type": None,
         "error_details": None,
@@ -216,6 +206,8 @@ def generation_metrics(result: dict[str, Any], generation: GenerationResult) -> 
             "attempts": generation.attempts,
             "estimated_cost_usd": generation.estimated_cost_usd,
             "cost_basis": generation.cost_basis,
+            "input_usd_per_million": generation.input_usd_per_million,
+            "output_usd_per_million": generation.output_usd_per_million,
             "finish_reason": generation.finish_reason,
         }
     )
@@ -255,7 +247,7 @@ def evaluate_one(
                 "error_details": error.issues,
             }
         )
-        if isinstance(error.generation, GenerationResult):
+        if error.generation is not None:
             generation_metrics(result, error.generation)
     except ProviderCallError as error:
         result.update(
@@ -266,6 +258,8 @@ def evaluate_one(
                 "latency_ms": round((time.perf_counter() - started) * 1000, 2),
             }
         )
+        if error.generation is not None:
+            generation_metrics(result, error.generation)
     except Exception as error:
         # Keep one unexpected SDK/transport failure from discarding the rest of
         # the run. Store the exception class only; SDK messages can contain data.
@@ -461,11 +455,10 @@ def write_reports(
     results: list[dict[str, Any]],
     providers: list[str],
     prompts: list[Path],
-) -> tuple[Path, Path, Path]:
+) -> tuple[Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     summary = summarize(results)
     report_path = output_dir / f"eval_{run_id}.json"
-    review_path = output_dir / f"eval_{run_id}_review.csv"
     analysis_path = output_dir / f"eval_{run_id}_analysis.md"
     report = {
         "run_id": run_id,
@@ -487,41 +480,14 @@ def write_reports(
         render_analysis_markdown(summary, run_id, len(cases)), encoding="utf-8"
     )
 
-    case_by_id = {case["id"]: case for case in cases}
-    with review_path.open("w", encoding="utf-8-sig", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames=REVIEW_FIELDS)
-        writer.writeheader()
-        for result in results:
-            case = case_by_id[result["case_id"]]
-            writer.writerow(
-                {
-                    "case_id": result["case_id"],
-                    "provider": result["provider"],
-                    "model": result["model"],
-                    "prompt_id": result["prompt_id"],
-                    "query": case["query"],
-                    "expected_category": result["expected_category"],
-                    "predicted_category": result["predicted_category"],
-                    "answer": result["answer"],
-                    "actions": json.dumps(result["actions"], ensure_ascii=False),
-                    "answer_criteria": " | ".join(case.get("answer_criteria", [])),
-                    "action_criteria": " | ".join(case.get("action_criteria", [])),
-                    "must_not": " | ".join(case.get("must_not", [])),
-                    "answer_relevant_0_or_1": "",
-                    "answer_safe_0_or_1": "",
-                    "actions_useful_0_or_1": "",
-                    "concise_0_or_1": "",
-                    "human_accept_0_or_1": "",
-                    "review_notes": "",
-                    "status": result["status"],
-                }
-            )
-    return report_path, review_path, analysis_path
+    return report_path, analysis_path
 
 
 def main() -> int:
     args = build_parser().parse_args()
     try:
+        if not isfinite(args.delay_seconds) or args.delay_seconds < 0:
+            raise ValueError("--delay-seconds debe ser un número finito y no negativo.")
         providers = [normalize_provider(provider) for provider in args.providers]
         prompts = [path if path.is_absolute() else ROOT / path for path in args.prompts]
         dataset_path = args.dataset if args.dataset.is_absolute() else ROOT / args.dataset
@@ -531,6 +497,7 @@ def main() -> int:
         return 2
 
     plan = build_plan(providers, prompts, cases)
+    plan["delay_seconds"] = args.delay_seconds
     if not args.execute:
         print(json.dumps(plan, ensure_ascii=False, indent=2))
         return 0
@@ -545,7 +512,9 @@ def main() -> int:
         for prompt_path in prompts:
             try:
                 config = config_for(provider, prompt_path, args.max_output_tokens)
-                service = SupportService(LLMClient(config, build_provider(config)))
+                service = SupportService(
+                    LLMClient(config, build_provider(config)), retry_invalid_response=False
+                )
             except Exception as error:
                 for case in cases:
                     row = base_result(case, None, provider, prompt_path)
@@ -567,11 +536,13 @@ def main() -> int:
                     results.append(row)
                 continue
 
-            for case in cases:
+            for index, case in enumerate(cases):
+                if index and args.delay_seconds:
+                    time.sleep(args.delay_seconds)
                 row = base_result(case, config, provider, prompt_path)
                 results.append(evaluate_one(service, case, row))
 
-    report_path, review_path, analysis_path = write_reports(
+    report_path, analysis_path = write_reports(
         output_dir, run_id, dataset_path, cases, results, providers, prompts
     )
     print(
@@ -581,7 +552,6 @@ def main() -> int:
                 "planned_api_calls": plan["planned_api_calls"],
                 "report": str(report_path),
                 "analysis": str(analysis_path),
-                "manual_review": str(review_path),
                 "usage_log": str(usage_path),
                 "summaries": summarize(results),
             },
@@ -589,6 +559,9 @@ def main() -> int:
             indent=2,
         )
     )
+    if not any(row["status"] in {"success", "invalid_contract"} for row in results):
+        print("La evaluación terminó sin respuestas del modelo. Revisá el reporte.", file=sys.stderr)
+        return 1
     return 0
 
 
