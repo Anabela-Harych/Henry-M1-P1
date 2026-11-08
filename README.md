@@ -2,7 +2,7 @@
 
 La CLI recibe un ticket en texto libre y devuelve una respuesta JSON con la categoría y acciones sugeridas para el agente humano. Ejecutá los comandos desde la raíz del proyecto, en PowerShell.
 
-## 1. Configurar los proveedores y ejecutar un ticket
+## 1. Configurar el entorno y ejecutar un ticket
 
 Con Python 3.14 instalado, prepará el entorno local.
 
@@ -20,12 +20,44 @@ Completá en `.env` la clave de cada proveedor que quieras probar. El archivo de
 | `--provider gemini` | `GOOGLE_API_KEY` | `gemini-3.6-flash` |
 | `--provider groq` | `GROQ_API_KEY` | `openai/gpt-oss-20b` |
 
+### Probar un ticket
+
+El ejemplo usa OpenAI. Para usar otro proveedor, reemplazá `openai` por `gemini` o `groq` según la clave que configuraste. El texto entre comillas es el ticket.
+
 ```powershell
 .\.venv\Scripts\python.exe -m src.main --provider openai "No puedo ingresar a mi cuenta"
+```
+
+La salida esperada tiene esta estructura.
+
+```json
+{
+  "answer": "Podés usar la opción de recuperación para restablecer el acceso.",
+  "confidence": 0.92,
+  "category": "account",
+  "actions": ["Orientar al usuario sobre el flujo oficial de recuperación."]
+}
+```
+
+El ticket pasa por un filtro de entrada. Si lo supera, el modelo recibe el ticket y el prompt de soporte. Pydantic valida la respuesta y el cliente registra los tokens, la latencia y el costo estimado.
+
+```mermaid
+flowchart TD
+    A["CLI · ticket en texto libre"] --> B{"Filtro de entrada"}
+    B -->|Bloqueado| C["Error de seguridad"]
+    B -->|Permitido| D["Cliente LLM · prompt y proveedor"]
+    D --> E["Pydantic · validación del JSON"]
+    E -->|Válido| F["JSON · respuesta, confianza, categoría y acciones"]
+    D -.-> G["Métricas · tokens, latencia y costo"]
+```
+
+Después de ejecutar un ticket, consultá el último registro de métricas.
+
+```powershell
 Get-Content .\data\metrics.jsonl -Tail 1
 ```
 
-Para usar otro proveedor, cambiá `--provider`. Si omitís la opción, la CLI usa `LLM_PROVIDER` de `.env`. Cada consulta que llega al modelo agrega una fila a `data/metrics.jsonl` por defecto. Ahí podés ver tokens, latencia, intentos, costo estimado y el estado final. Si el proveedor falla, el registro incluye el tipo de error y el código HTTP cuando está disponible. [Diseño y configuración](ARCHITECTURE.md)
+Si omitís `--provider`, la CLI usa el proveedor configurado en `.env`. Cada consulta que llega al modelo agrega una fila a `data/metrics.jsonl` por defecto. Ahí podés ver tokens, latencia, intentos, costo estimado y el estado final. Si el proveedor falla, el registro incluye el tipo de error y el código HTTP cuando está disponible. [Diseño y configuración](ARCHITECTURE.md)
 
 ## 2. Comparar y elegir el prompt
 
@@ -43,17 +75,6 @@ El prompt predeterminado de la CLI es [`v1.1`](prompts/v1_1_scope.yaml). El mode
 Para repetir el piloto con 40 consultas planificadas, usá el comando del paso 5, agregá `prompts/v2-fewshot.yaml` después del prompt `v1` y sumá `--limit-per-category 5` antes de `--execute`. La evidencia original corresponde a la corrida `20261107T210646Z`.
 
 ## 3. Verificar el contrato y los reintentos
-
-El comando del paso 1 devuelve un JSON como este.
-
-```json
-{
-  "answer": "Podés usar la opción de recuperación para restablecer el acceso.",
-  "confidence": 0.92,
-  "category": "account",
-  "actions": ["Orientar al usuario sobre el flujo oficial de recuperación."]
-}
-```
 
 Pydantic exige los cuatro campos. `confidence` es un número de 0 a 1 declarado por el modelo, `category` admite `billing`, `technical`, `account` u `other`, y `actions` contiene sugerencias para revisión humana.
 
@@ -97,7 +118,19 @@ try {
 }
 ```
 
-Omití `--execute` para ver el plan sin hacer llamadas. En `data/reports/`, el JSON guarda el detalle por ticket, el resumen Markdown muestra la exactitud global y por categoría, y el log JSONL registra el consumo de las consultas al proveedor. Una categoría distinta, una salida inválida o un error cuentan como desacierto. `ambiguous` permite filtrar tickets dudosos en el reporte y conserva el mismo criterio de puntuación. Si ninguna configuración recibe una respuesta, el runner guarda el diagnóstico y sale con código `1`.
+Omití `--execute` para ver el plan sin hacer llamadas. Una categoría distinta, una salida inválida o un error cuentan como desacierto. `ambiguous` permite filtrar tickets dudosos en el reporte y conserva el mismo criterio de puntuación. Si ninguna configuración recibe una respuesta, el runner guarda el diagnóstico y sale con código `1`.
+
+### Qué contiene cada reporte
+
+| Archivo en `data/reports/` | Para qué sirve |
+|---|---|
+| `eval_<id>.json` | Revisar el resultado de cada ticket. Incluye la categoría esperada, la categoría devuelta, la respuesta, las acciones y el estado de la evaluación. |
+| `eval_<id>_analysis.md` | Leer las tablas de exactitud global y por categoría, validez del contrato, latencia y costo estimado. |
+| `eval_<id>_usage.jsonl` | Auditar tokens, intentos, latencia y costo por consulta enviada al proveedor durante la evaluación. |
+| `input_guard_latest.jsonl` | Ver si cada caso del filtro fue permitido o bloqueado según lo esperado. Lo genera el comando del paso 4. |
+| [`input_guard_report.example.jsonl`](data/reports/input_guard_report.example.jsonl) | Consultar un ejemplo de la corrida inicial del filtro que se conserva en el repositorio. |
+
+Los tres archivos `eval_<id>` comparten el identificador de la corrida. Para revisar un desacierto puntual, buscá en el JSON un caso con `category_correct: false` y compará `expected_category`, `predicted_category` y `status`. Los resultados nuevos se generan localmente.
 
 ### Extra credit · Comparativa de modelos
 
@@ -112,5 +145,9 @@ Se usaron los mismos 30 tickets, el prompt `v1`, 256 tokens de salida y cero rei
 Gemini devolvió 20 errores `429` y dos `503` sin datos de consumo. En los ocho tickets que respondieron tanto Gemini como OpenAI, ambos acertaron 7/8. Se mantuvo OpenAI por defecto por su mayor cobertura en esa corrida. Para repetir la comparación, cambiá `--providers openai` por `--providers openai gemini groq` y agregá `--delay-seconds 6` antes de `--execute`.
 
 El ticket 403 quedó marcado como ambiguo. OpenAI interpretó el código como un problema de permisos y sugirió revisar el acceso. Con más contexto, acertó el caso de una falla que afectaba a varios administradores y el caso de un permiso faltante confirmado.
+
+## Uso de IA durante el desarrollo
+
+Definí los cambios a partir de los problemas que observé y usé Codex como apoyo para implementarlos.
 
 [Arquitectura](ARCHITECTURE.md) · [Registro de cambios](CHANGELOG.md)

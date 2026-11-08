@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nubbix · Demo de triage</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="demo.js" defer></script>
+</head>
+<body>
+  <main class="workspace">
+    <header>
+      <p class="eyebrow">Nubbix / Soporte</p>
+      <h1>Un ticket, de entrada a respuesta</h1>
+      <p class="intro">Esta demo ilustra el recorrido de un ticket de soporte. Elegí un caso para ver qué capas intervienen y qué salida mostraría la consola.</p>
+      <p class="badge">Flujo simulado · Respuestas y métricas de ejemplo</p>
+    </header>
+
+    <div class="columns">
+      <section class="panel" aria-labelledby="input-title">
+        <h2 id="input-title">Entrada</h2>
+        <label for="scenario">Caso de prueba</label>
+        <select id="scenario">
+          <option value="account">Problema de acceso</option>
+          <option value="outside">Consulta fuera de alcance</option>
+          <option value="injection">Intento de inyección</option>
+          <option value="retry">JSON inválido y reintento</option>
+        </select>
+        <blockquote id="ticket"></blockquote>
+        <button id="run" type="button">Ejecutar ejemplo</button>
+        <p id="status" class="status" role="status"></p>
+      </section>
+
+      <section class="panel" aria-labelledby="flow-title">
+        <h2 id="flow-title">Recorrido del ticket</h2>
+        <ol id="flow" class="flow">
+          <li><strong>Filtro de entrada</strong><span></span></li>
+          <li><strong>Modelo y prompt</strong><span></span></li>
+          <li><strong>Validación con Pydantic</strong><span></span></li>
+          <li><strong>Registro de métricas</strong><span></span></li>
+        </ol>
+      </section>
+    </div>
+
+    <section class="panel result" aria-labelledby="output-title">
+      <h2 id="output-title">Salida en consola</h2>
+      <details id="retry-details" hidden>
+        <summary>Ver la respuesta rechazada del primer intento</summary>
+        <p>El JSON quedó incompleto. Pydantic lo rechazó y el cliente volvió a llamar al modelo.</p>
+        <pre><code id="rejected-output"></code></pre>
+      </details>
+      <p id="channel"></p>
+      <pre><code id="output"></code></pre>
+      <dl id="metrics" class="metrics" hidden>
+        <div><dt>Tokens de entrada</dt><dd id="input-tokens"></dd></div>
+        <div><dt>Tokens de salida</dt><dd id="output-tokens"></dd></div>
+        <div><dt>Latencia</dt><dd id="latency"></dd></div>
+        <div><dt>Costo estimado</dt><dd id="cost"></dd></div>
+        <div><dt>Intentos</dt><dd id="attempts"></dd></div>
+      </dl>
+    </section>
+
+    <section class="panel result" aria-labelledby="project-title">
+      <h2 id="project-title">Qué incluye el proyecto Nubbix</h2>
+      <p class="intro">El proyecto incluye una CLI, pruebas locales y evaluaciones con proveedores reales. Los resultados de abajo corresponden a las corridas documentadas en el README.</p>
+      <dl class="project-summary">
+        <div>
+          <dt>Métricas</dt>
+          <dd>La CLI registra tokens, latencia, intentos y costo estimado en <code>data/metrics.jsonl</code>.</dd>
+        </div>
+        <div>
+          <dt>Evaluaciones</dt>
+          <dd>Un dataset de <strong>30 tickets etiquetados</strong> permite medir la exactitud global y por categoría.</dd>
+        </div>
+        <div>
+          <dt>Seguridad</dt>
+          <dd>El filtro local bloqueó <strong>10 de 10 ataques</strong> de la suite y permitió el caso legítimo.</dd>
+        </div>
+        <div>
+          <dt>Prompts versionados</dt>
+          <dd><code>v1</code> y <code>v2</code> acertaron <strong>19 de 20</strong> en el piloto. El costo estimado de <code>v1</code> fue 17 % menor. La CLI usa <code>v1.1</code> para explicitar el alcance del soporte.</dd>
+        </div>
+        <div>
+          <dt>Comparativa de modelos</dt>
+          <dd>Sobre los mismos 30 tickets, OpenAI acertó <strong>29</strong>, Groq <strong>28</strong> y Gemini <strong>7</strong>. Gemini registró 22 errores del proveedor.</dd>
+        </div>
+      </dl>
+      <p class="intro">El <code>README.md</code> del repositorio reúne los comandos y las tablas de resultados. <code>ARCHITECTURE.md</code> explica cómo se conectan las capas.</p>
+    </section>
+  </main>
+</body>
+</html>

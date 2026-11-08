@@ -21,7 +21,7 @@ OpenAI queda como proveedor inicial por su cobertura en la evaluación. Gemini p
 
 ## 2. Context engineering
 
-`src/llm/prompt_loader.py` carga un YAML con una versión y una instrucción de sistema. El ticket se envía como entrada separada. `v1` da reglas directas, `v2` agrega ejemplos y `v3` divide las reglas en secciones. El [piloto de prompts](README.md#2-comparar-y-elegir-el-prompt) respalda la selección de `v1` con OpenAI.
+`src/llm/prompt_loader.py` carga desde `prompts/` el identificador de versión, la instrucción de sistema y los ejemplos cuando están definidos. El ticket se envía como entrada separada. El piloto comparó las reglas directas de `v1` con los ejemplos de `v2`. La CLI usa `v1.1` por defecto, que explicita el alcance del soporte de Nubbix. [Piloto de prompts](README.md#2-comparar-y-elegir-el-prompt)
 
 ## 3. Contrato de salida
 
@@ -33,4 +33,9 @@ OpenAI queda como proveedor inicial por su cobertura en la evaluación. Gemini p
 
 ## 5. Evaluación
 
-`evals/runner.py` evalúa combinaciones de proveedor y prompt sobre `data/datasets/eval_ticket_sup.jsonl`. Calcula *Exact Match* de categoría global y por categoría, validez del contrato, consumo, costo y latencia. El JSON guarda las respuestas y acciones por caso. `evals/input_guard.py` evalúa el filtro por separado con el dataset adversarial. Los [comandos de ejecución](README.md#5-ejecutar-las-evals-y-leer-el-reporte) están en el README.
+| Dataset | Evaluador | Criterio |
+|---|---|---|
+| `data/datasets/eval_ticket_sup.jsonl` | `evals/runner.py` | Compara la categoría devuelta con `expected_category` y calcula la exactitud global y por categoría. Un ticket de doble cobro, por ejemplo, espera `billing`. |
+| `data/datasets/input_guard_adversarial.jsonl` | `evals/input_guard.py` | Compara la decisión del filtro con `expected`. Un pedido de revelar la clave de API espera `blocked`. |
+
+El evaluador de soporte también registra la validez del contrato, el consumo, el costo y la latencia. Los reportes se guardan en `data/reports/` por defecto. [Comandos de evaluación](README.md#5-ejecutar-las-evals-y-leer-el-reporte) · [Guía de reportes](README.md#qué-contiene-cada-reporte)
