@@ -51,7 +51,21 @@ flowchart TD
     D -.-> G["Métricas · tokens, latencia y costo"]
 ```
 
-Después de ejecutar un ticket, consultá el último registro de métricas.
+### Demo web del recorrido de un ticket
+
+**Material extra de la entrega.** La demo ilustra cuatro recorridos de un ticket: acceso a una cuenta, consulta fuera de alcance, intento de inyección y JSON inválido con reintento. Usa respuestas y métricas de ejemplo y funciona sin clave de API.
+
+Abrí `demo-web/index.html` directamente en tu navegador o iniciá el servidor local desde la raíz del proyecto. [Archivo de la demo](demo-web/index.html)
+
+```powershell
+.\.venv\Scripts\python.exe -m http.server 8765 --bind 127.0.0.1 --directory demo-web
+```
+
+Con la consola abierta, entrá a [127.0.0.1:8765](http://127.0.0.1:8765/), elegí un caso y pulsá **Ejecutar ejemplo**.
+
+### Consultar las métricas de la CLI
+
+Después de ejecutar un ticket desde PowerShell, consultá el último registro de métricas.
 
 ```powershell
 Get-Content .\data\metrics.jsonl -Tail 1
